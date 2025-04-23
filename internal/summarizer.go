@@ -11,6 +11,13 @@ import (
 	gitignore "github.com/sabhiram/go-gitignore"
 )
 
+var DefaultIgnorePatterns = []string{
+	".git/",
+	"go.sum",
+	"summary.md",
+	".gitignore",
+}
+
 type fileInfo struct {
 	RelativePath string
 	Content      []byte
@@ -18,15 +25,38 @@ type fileInfo struct {
 }
 
 func SummarizeProject(rootDir string, outputFileName string) error {
-	ignoreMatcher, err := loadGitignore(rootDir)
-	if err != nil {
-		ignoreMatcher = gitignore.CompileIgnoreLines([]string{}...)
+	ignorePatterns := make([]string, 0, len(DefaultIgnorePatterns)+1)
+	ignorePatterns = append(ignorePatterns, DefaultIgnorePatterns...)
+	ignorePatterns = append(ignorePatterns, outputFileName)
+
+	ignoreMatcher := gitignore.CompileIgnoreLines(ignorePatterns...)
+
+	gitignorePath := filepath.Join(rootDir, ".gitignore")
+	if _, err := os.Stat(gitignorePath); err == nil {
+		if _, err := gitignore.CompileIgnoreFile(gitignorePath); err == nil {
+			ignoreMatcher = gitignore.CompileIgnoreLines(func() []string {
+				allPatterns := make([]string, len(ignorePatterns))
+				copy(allPatterns, ignorePatterns)
+
+				content, err := os.ReadFile(gitignorePath)
+				if err == nil {
+					lines := strings.Split(string(content), "\n")
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if line != "" && !strings.HasPrefix(line, "#") {
+							allPatterns = append(allPatterns, line)
+						}
+					}
+				}
+				return allPatterns
+			}()...)
+		}
 	}
 
 	includedFiles := make([]fileInfo, 0)
 	filesForStructure := make([]string, 0)
 
-	err = filepath.WalkDir(rootDir, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(rootDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			fmt.Errorf("Error accessing %q: %v\n", path, err)
 			return err
@@ -41,9 +71,6 @@ func SummarizeProject(rootDir string, outputFileName string) error {
 
 		if d.IsDir() && d.Name() == ".git" {
 			return filepath.SkipDir
-		}
-		if !d.IsDir() && (d.Name() == ".gitignore" || d.Name() == outputFileName) {
-			return nil
 		}
 
 		checkPath := filepath.ToSlash(relativePath)
@@ -85,16 +112,16 @@ func SummarizeProject(rootDir string, outputFileName string) error {
 		return fmt.Errorf("error generating project tree: %w", err)
 	}
 	summaryContent.WriteString(treeString)
-	summaryContent.WriteString("```\n\n# Project Files\n\n")
+	summaryContent.WriteString("```\n\n\n\n# Project Files\n\n")
 
 	for _, file := range includedFiles {
 		displayPath := filepath.ToSlash(file.RelativePath)
-		summaryContent.WriteString(fmt.Sprintf("```%s\n", displayPath))
+		summaryContent.WriteString(fmt.Sprintf("◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦\nfilepath: ./%s\n◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦\n", displayPath))
 		summaryContent.WriteString(string(file.Content))
 		if len(file.Content) > 0 && file.Content[len(file.Content)-1] != '\n' {
 			summaryContent.WriteString("\n")
 		}
-		summaryContent.WriteString("```\n\n")
+		summaryContent.WriteString("◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦◦\n\n\n\n")
 	}
 
 	outputPath := filepath.Join(rootDir, outputFileName)
@@ -103,24 +130,7 @@ func SummarizeProject(rootDir string, outputFileName string) error {
 		return fmt.Errorf("could not write the file %s: %w", outputFileName, err)
 	}
 
-	return nil 
-}
-
-func loadGitignore(rootDir string) (gitignore.IgnoreParser, error) {
-	gitignorePath := filepath.Join(rootDir, ".gitignore")
-	_, err := os.Stat(gitignorePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("error accessing %s: %w", gitignorePath, err)
-	}
-
-	ignorer, err := gitignore.CompileIgnoreFile(gitignorePath)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", gitignorePath, err)
-	}
-	return ignorer, nil
+	return nil
 }
 
 func generateProjectTree(rootDir string, paths []string) (string, error) {
@@ -171,7 +181,7 @@ func isLastSibling(rootDir, currentPath string, allPaths []string) bool {
 	parentDir := filepath.Dir(currentPath)
 	var effectiveParentDir string
 	if parentDir == "." {
-		effectiveParentDir = "" 
+		effectiveParentDir = ""
 	} else {
 		effectiveParentDir = parentDir
 	}
@@ -182,13 +192,13 @@ func isLastSibling(rootDir, currentPath string, allPaths []string) bool {
 		pDir := filepath.Dir(p)
 		var effectivePDir string
 		if pDir == "." {
-			effectivePDir = "" 
+			effectivePDir = ""
 		} else {
 			effectivePDir = pDir
 		}
 
 		if effectivePDir == effectiveParentDir {
-			lastSiblingInDir = p 
+			lastSiblingInDir = p
 			break
 		}
 	}
